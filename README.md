@@ -67,7 +67,7 @@ real_time_inference(model_path='runs/train/exp/weights/best.pt', video_source=0)
 - 集成额外的鸡蛋质量检测指标。
 
 ## 贡献者
-- **[您的姓名]**
+Yubo Liu
 
 ## 许可协议
 本项目遵循 MIT 许可协议。
