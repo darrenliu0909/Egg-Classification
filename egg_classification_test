@@ -1,0 +1,115 @@
+import torch
+from ultralytics import YOLO
+import cv2
+import os
+import random
+from sklearn.model_selection import train_test_split
+import shutil
+
+# Step 1: Data Preparation
+
+def split_dataset(image_dir, labels_dir, output_dir, train_ratio=0.7, val_ratio=0.2, test_ratio=0.1):
+    """
+    Splits dataset into train, val, and test folders
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    for split in ['train', 'val', 'test']:
+        os.makedirs(os.path.join(output_dir, 'images', split), exist_ok=True)
+        os.makedirs(os.path.join(output_dir, 'labels', split), exist_ok=True)
+    
+    images = [f for f in os.listdir(image_dir) if f.endswith(('.jpg', '.png'))]
+    random.shuffle(images)
+    
+    train_size = int(len(images) * train_ratio)
+    val_size = int(len(images) * val_ratio)
+    test_size = len(images) - train_size - val_size
+    
+    splits = {
+        'train': images[:train_size],
+        'val': images[train_size:train_size+val_size],
+        'test': images[train_size+val_size:]
+    }
+    
+    for split, split_images in splits.items():
+        for image in split_images:
+            shutil.copy(os.path.join(image_dir, image), os.path.join(output_dir, 'images', split, image))
+            label_file = os.path.splitext(image)[0] + '.txt'
+            if os.path.exists(os.path.join(labels_dir, label_file)):
+                shutil.copy(os.path.join(labels_dir, label_file), os.path.join(output_dir, 'labels', split, label_file))
+    
+    print("Dataset split completed!")
+
+# Step 2: Train YOLOv8 Model with Fine-Tuning
+
+def train_yolov8(model_type='yolov8s', data_yaml='data.yaml', epochs=50, batch_size=8, lr=0.001, weight_decay=0.0005):
+    """
+    Trains YOLOv8 on the prepared dataset with fine-tuning techniques
+    """
+    model = YOLO(model_type + '.pt')  # Load pretrained model
+    
+    model.train(
+        data=data_yaml, 
+        epochs=epochs, 
+        batch=batch_size, 
+        imgsz=640, 
+        device='cuda' if torch.cuda.is_available() else 'cpu',
+        lr0=lr, 
+        weight_decay=weight_decay, 
+        optimizer='SGD'  # Try different optimizers such as Adam or RMSprop
+    )
+    print("Training completed!")
+
+# Step 3: Model Evaluation
+
+def evaluate_model(model_path, data_yaml):
+    """
+    Evaluates YOLOv8 model performance
+    """
+    model = YOLO(model_path)
+    results = model.val(data=data_yaml)
+    print("Evaluation completed!", results)
+
+# Step 4: Real-Time Inference
+
+def real_time_inference(model_path, video_source=0):
+    """
+    Runs real-time inference using YOLOv8 model
+    """
+    model = YOLO(model_path)
+    cap = cv2.VideoCapture(video_source)
+    
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
+        
+        results = model(frame)
+        
+        for r in results:
+            for box in r.boxes:
+                x1, y1, x2, y2 = map(int, box.xyxy[0])
+                confidence = box.conf[0]
+                class_id = int(box.cls[0])
+                label = f"{model.names[class_id]}: {confidence:.2f}"
+                
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        
+        cv2.imshow("Egg Status Detection", frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+    
+    cap.release()
+    cv2.destroyAllWindows()
+
+# Example Usage
+if __name__ == "__main__":
+    image_dir = "dataset/images"
+    labels_dir = "dataset/labels"
+    output_dir = "dataset_split"
+    data_yaml = "data.yaml"  # YAML file with dataset details
+    
+    split_dataset(image_dir, labels_dir, output_dir)
+    train_yolov8(model_type='yolov8s', data_yaml=data_yaml, epochs=50, batch_size=8, lr=0.001, weight_decay=0.0005)
+    evaluate_model(model_path='runs/train/exp/weights/best.pt', data_yaml=data_yaml)
+    real_time_inference(model_path='runs/train/exp/weights/best.pt', video_source=0)
